@@ -1,0 +1,11 @@
+[all]
+backend.readapt.wtf ansible_python_interpreter=/usr/bin/python3
+frontend.readapt.wtf ansible_python_interpreter=/usr/bin/python3
+
+
+[backend]
+backend.readapt.wtf
+
+
+[frontend]
+frontend.readapt.wtf

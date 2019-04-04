@@ -1,0 +1,43 @@
+# Version to install
+elastic_version: 6.5.2
+elastic_download: https://artifacts.elastic.co
+apm_java_version: 1.1.0
+gradle_version: 4.10.2
+php_version: 7.2
+
+
+# Elasticsearch credentials
+elasticsearch_host: http://localhost:9200/
+elasticsearch_user: admin
+elasticsearch_password: secret
+kibana_host: http://localhost:5601
+
+
+# Setup of the infrastructure
+env: workshop
+domain: readapt.io
+ssh_password: $6$F4NWXRFtSdCi8$DsB5vvMJYusQhSbvGXrYDXL6Xj37MUuqFCd4dGXdKd6NyxT3lpdELN07/Kpo7EjjWnm9zusFg/LLFv6oc.ynu/ # "secret", generate with mkpasswd --method=sha-512
+frontend_server: localhost:8080
+backend_server: localhost:8081
+apm_server: localhost:8200
+apm_secret: secret
+
+
+# MySQL
+mysql_server: localhost:3306
+mysql_user: admin
+mysql_password: secret
+mysql_database: person
+
+
+# SilverStripe setup
+silverstripe_version: 4.2.2
+silverstripe_user: admin
+silverstripe_password: secret
+silverstripe_database: silverstripe
+silverstripe_directory: /var/www/html/silverstripe/
+
+
+# Credentials for Kibana dashboard-only mode
+attendee_user: admin
+attendee_password: secret

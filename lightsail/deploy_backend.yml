@@ -1,0 +1,29 @@
+- hosts: backend
+  become: true
+  gather_facts: yes
+
+
+  vars_files:
+    - variables.yml
+
+
+  post_tasks:
+    - include_tasks: include_event.yml
+      vars:
+        application: deploy_backend
+
+
+  tasks:
+
+    # Check that we can reach MySQL
+    - name: Check MySQL is accessible before deploying the application
+      wait_for:
+        host: "{{ mysql_server }}"
+        port: 3306
+        state: started
+        delay: 0
+        timeout: 3
+
+    - include_tasks: include_deploy_boot.yml
+      vars:
+        application: backend

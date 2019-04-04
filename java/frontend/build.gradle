@@ -1,0 +1,25 @@
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+
+
+jar {
+	baseName = 'frontend'
+	version = '1.0'
+}
+
+
+dependencies {
+	compile(
+			'org.springframework.boot:spring-boot-starter-web',
+			'org.springframework.boot:spring-boot-devtools',
+			'org.springframework.boot:spring-boot-starter-thymeleaf',
+			"net.logstash.logback:logstash-logback-encoder:${logbackEncoderVersion}",
+			'org.springframework.boot:spring-boot-starter-actuator',
+			'org.jolokia:jolokia-core'
+	)
+}
+
+
+bootJar {
+    launchScript()
+}

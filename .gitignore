@@ -1,0 +1,13 @@
+.gradle/
+.idea/
+.terraform/
+build/
+out/
+
+*.backup
+*.iml
+*.log
+*.retry
+*.tfstate
+*.tfstate.lock.info
+

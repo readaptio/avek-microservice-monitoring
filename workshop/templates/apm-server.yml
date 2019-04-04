@@ -1,0 +1,23 @@
+apm-server:
+  host: "0.0.0.0:8200"
+
+  secret_token: "${APM_SEC}"
+
+
+setup.template.settings:
+  index.number_of_shards: 1
+  index.codec: best_compression
+
+
+output.elasticsearch:
+  hosts: ["{{ elasticsearch_host }}"]
+  username: "{{ elasticsearch_user }}"
+  password: "${ES_PWD}"
+
+
+setup:
+  kibana:
+    host: "{{ kibana_host }}"
+    username: "{{ elasticsearch_user }}"
+    password: "${ES_PWD}"
+  dashboards.enabled: true

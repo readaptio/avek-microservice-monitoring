@@ -1,0 +1,268 @@
+- hosts: all
+  become: true
+  gather_facts: yes
+
+
+  vars_files:
+    - variables.yml
+
+
+  vars:
+      kibana_basic_auth: "{{ attendee_user }}:{{ attendee_password  }}"
+
+
+  pre_tasks:
+    - name: Install Python2 to make Ansible work
+      raw: sudo apt-get update && sudo apt-get -y install python-minimal
+
+
+  post_tasks:
+    - include_tasks: include_event.yml
+      vars:
+        application: configure_all
+
+
+  tasks:
+
+
+    # System
+    - name: Update and upgrade apt packages
+      apt: upgrade=dist
+
+    - name: Install NTP to avoid time drift and PIP to manage Python dependencies plus its build tools
+      apt:
+        name: [ 'ntp', 'ntpdate', 'python3-pip', 'build-essential', 'libssl-dev', 'libffi-dev' ]
+
+    - name: Install the JRE
+      apt: name=openjdk-8-jre-headless install_recommends=no
+
+    - name: Install the pyOpenSSL library, so Ansible can use it to check TLS certificates
+      pip: name=pyopenssl
+
+
+    # Add David
+    - name: Add David's user
+      user:
+        name: david
+        groups: sudo
+        shell: /bin/bash
+        state: present
+
+    - name: Placing key for David
+      authorized_key:
+        user: david
+        key: "{{ lookup('file', './files/david.pub') }}"
+
+    - name: Allow David to log in via SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^AllowUsers'
+        line: 'AllowUsers ubuntu david'
+        state: present
+
+    - name: Allow passwordless sudo
+      lineinfile:
+        path: /etc/sudoers
+        state: present
+        regexp: '^%sudo'
+        line: '%sudo ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+
+    - name: Restart SSH
+      service: name=ssh state=restarted
+
+
+    # Global Elasticsearch configuration — this should run early on, so it is used for all later steps
+    - name: Register a global index template
+      uri:
+        url: "{{elasticsearch_host}}_template/template_global"
+        body_format: json
+        method: PUT
+        user: "{{ elasticsearch_user }}"
+        password: "{{ elasticsearch_password }}"
+        force_basic_auth: true
+        body:
+          template: "*"
+          settings:
+            number_of_shards: 1
+            number_of_replicas: 0
+            refresh_interval: 2s
+        status_code:
+          - 201
+          - 200
+      run_once: true
+
+
+    # Beats
+    - name: Set the Elasticsearch password for Beats
+      lineinfile:
+        dest: /tmp/cred
+        line: "{{ elasticsearch_password }}"
+        state: present
+        create: yes
+        mode: 0600
+
+    - name: Get the Beats
+      apt: deb={{ elastic_download }}/downloads/beats/{{ item }}/{{ item }}-{{ elastic_version }}-amd64.deb
+      loop:
+      - auditbeat
+      - filebeat
+      - metricbeat
+      - packetbeat
+
+    - name: Change the Beats configuration
+      template: "src=templates/{{ item }}.yml dest=/etc/{{ item }}/{{ item }}.yml"
+      loop:
+      - auditbeat
+      - filebeat
+      - metricbeat
+      - packetbeat
+
+    - name: Create the Beats keystores
+      command: "{{ item }} keystore create --force"
+      loop:
+      - auditbeat
+      - filebeat
+      - metricbeat
+      - packetbeat
+
+    - name: Set the password in the Beats keystore files
+      shell: cat /tmp/cred | {{ item }} keystore add ES_PWD --stdin --force
+      loop:
+      - auditbeat
+      - filebeat
+      - metricbeat
+      - packetbeat
+
+    - name: Remove the password file
+      file:
+        path: /tmp/cred
+        state: absent
+
+    - name: Restart and make sure the Beats autostart
+      service: name={{ item }} state=restarted enabled=yes
+      loop:
+      - auditbeat
+      - filebeat
+      - metricbeat
+      - packetbeat
+
+    - name: Wait if the Beats are actually running
+      pause: minutes=1
+
+    - name: Get the state of all services and check the status of Auditbeat
+      service_facts: ~
+      failed_when: ansible_facts.services.auditbeat.state != "running"
+
+    - name: Get the state of all services and check the status of Filebeat
+      service_facts: ~
+      failed_when: ansible_facts.services.filebeat.state != "running"
+
+    - name: Get the state of all services and check the status of Metricbeat
+      service_facts: ~
+      failed_when: ansible_facts.services.metricbeat.state != "running"
+
+    - name: Get the state of all services and check the status of Packetbeat
+      service_facts: ~
+      failed_when: ansible_facts.services.packetbeat.state != "running"
+
+
+    # TLS
+    - name: Add the certbot repository
+      apt_repository: repo="ppa:certbot/certbot"
+
+    - name: Install certbot and update the cache for the new PPA
+      apt: name=python-certbot-nginx update_cache=yes
+
+    - name: Add the hostname to the certificates to create
+      set_fact:
+        certificates:
+          - "{{ inventory_hostname }}"
+
+    - name: Add more domains to the frontend certificate
+      set_fact:
+        certificates:
+          - "{{ inventory_hostname }}"
+          - "{{ domain }}"
+          - "www.{{ domain }}"
+      when: inventory_hostname_short == "frontend"
+
+    - name: Add more domains to the backend certificate
+      set_fact:
+        certificates:
+          - "{{ inventory_hostname }}"
+          - "kibana.{{ domain }}"
+          - "dashboard.{{ domain }}"
+      when: inventory_hostname_short == "backend"
+
+    - name: Just to be extra sure, explicitly stop nginx (if it is installed)
+      service: name=nginx state=stopped
+      ignore_errors: yes
+
+    - name: Create the certificate
+      command: >
+        certbot certonly --non-interactive --standalone
+        --agree-tos --email admin@{{ domain }}
+        -d {{ certificates | join(',') }}
+        creates=/etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem
+
+    - name: Generate strong dhparams, but only if the file doesn't exist
+      command: openssl dhparam -out /etc/ssl/certs/dhparam.pem 2048 creates=/etc/ssl/certs/dhparam.pem
+
+
+    # APM
+    - name: Fetch the APM agent
+      get_url:
+        url: "https://search.maven.org/remotecontent?filepath=co/elastic/apm/elastic-apm-agent/{{ apm_java_version }}/elastic-apm-agent-{{ apm_java_version }}.jar"
+        dest: "/opt/elastic-apm-agent-{{ apm_java_version }}.jar"
+        mode: 0444
+
+
+    # nginx
+    - name: Install nginx
+      apt: name=nginx
+
+    - name: Set a global TLS configuration
+      template: src=templates/tls.conf dest=/etc/nginx/tls.conf
+
+    - name: Change the nginx configuration
+      template: src=templates/nginx.conf dest=/etc/nginx/sites-available/default
+
+    - name: Restart nginx and make sure it autostarts
+      service: name=nginx state=restarted enabled=yes
+
+    - name: Check HTTP
+      uri:
+        url: "http://{{ inventory_hostname }}"
+        follow_redirects: none
+        status_code: 301
+      register: response
+      retries: 3
+      delay: 2
+      delegate_to: 127.0.0.1
+      become: false
+
+    - name: Fail if HTTP is not being redirected to HTTPS
+      fail:
+      when: response.status != 301
+
+    - name: Check HTTPS
+      openssl_certificate:
+        path: /etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem
+        provider: assertonly
+        issuer:
+          O: Let's Encrypt
+        has_expired: false
+        subject_alt_name:
+          - "DNS:{{ inventory_hostname }}"
+
+    - name: Check HTTPS apex
+      openssl_certificate:
+        path: /etc/letsencrypt/live/{{ inventory_hostname }}/fullchain.pem
+        provider: assertonly
+        issuer:
+          O: Let's Encrypt
+        has_expired: false
+        subject_alt_name:
+          - "DNS:{{ domain }}"
+      when: inventory_hostname_short == "frontend"
